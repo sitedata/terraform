@@ -111,13 +111,14 @@ func renderPlan(plan *plans.Plan, schemas *terraform.Schemas, view *View) {
 				view.outputColumns(),
 			))
 		}
-		view.streams.Print(format.HorizontalRule(view.colorize, view.outputColumns()))
-		view.streams.Println("")
 	}
 
 	counts := map[plans.Action]int{}
 	var rChanges []*plans.ResourceInstanceChangeSrc
 	for _, change := range plan.Changes.Resources {
+		if change.Action == plans.NoOp {
+			continue // We don't show anything for no-op changes
+		}
 		if change.Action == plans.Delete && change.Addr.Resource.Resource.Mode == addrs.DataResourceMode {
 			// Avoid rendering data sources on deletion
 			continue
@@ -125,6 +126,93 @@ func renderPlan(plan *plans.Plan, schemas *terraform.Schemas, view *View) {
 
 		rChanges = append(rChanges, change)
 		counts[change.Action]++
+	}
+
+	if len(counts) == 0 {
+		// If we didn't find any changes to report at all then this is a
+		// "No changes" plan. How we'll present this depends on whether
+		// the plan is "applyable" and, if so, whether it had refresh changes
+		// that we already would've presented above.
+
+		switch plan.UIMode {
+		case plans.RefreshOnlyMode:
+			if haveRefreshChanges {
+				// We already generated a sufficient prompt about what will
+				// happen if applying this change above, so we don't need to
+				// say anything more.
+				return
+			}
+
+			view.streams.Print(
+				view.colorize.Color("\n[reset][bold][green]No changes.[reset][bold] Your infrastructure still matches the configuration.[reset]\n\n"),
+			)
+			view.streams.Println(format.WordWrap(
+				"Terraform has checked that the real remote objects still match the result of your most recent changes, and found no differences.",
+				view.outputColumns(),
+			))
+
+		case plans.DestroyMode:
+			if haveRefreshChanges {
+				view.streams.Print(format.HorizontalRule(view.colorize, view.outputColumns()))
+				view.streams.Println("")
+			}
+			view.streams.Print(
+				view.colorize.Color("\n[reset][bold][green]No changes.[reset][bold] No objects need to be destroyed.[reset]\n\n"),
+			)
+			view.streams.Println(format.WordWrap(
+				"Either you have not created any objects yet or the existing objects were already deleted outside of Terraform.",
+				view.outputColumns(),
+			))
+
+		default:
+			if haveRefreshChanges {
+				view.streams.Print(format.HorizontalRule(view.colorize, view.outputColumns()))
+				view.streams.Println("")
+			}
+			view.streams.Print(
+				view.colorize.Color("\n[reset][bold][green]No changes.[reset][bold] Your infrastructure matches the configuration.[reset]\n\n"),
+			)
+
+			if haveRefreshChanges && !plan.CanApply() {
+				if plan.CanApply() {
+					// In this case, applying this plan will not change any
+					// remote objects but _will_ update the state to match what
+					// we detected during refresh, so we'll reassure the user
+					// about that.
+					view.streams.Println(format.WordWrap(
+						"Your configuration already matches the changes detected above, so applying this plan will only update the state to include the changes detected above and won't change any real infrastructure.",
+						view.outputColumns(),
+					))
+				} else {
+					// In this case we detected changes during refresh but this isn't
+					// a planning mode where we consider those to be applyable. The
+					// user must re-run in refresh-only mode in order to update the
+					// state to match the upstream changes.
+					suggestion := "."
+					if !view.runningInAutomation {
+						// The normal message includes a specific command line to run.
+						suggestion = ":\n  terraform apply -refresh-only"
+					}
+					view.streams.Println(format.WordWrap(
+						"Your configuration already matches the changes detected above. If you'd like to update the Terraform state to match, create and apply a refresh-only plan"+suggestion,
+						view.outputColumns(),
+					))
+				}
+				return
+			}
+
+			// If we get down here then we're just in the simple situation where
+			// the plan isn't applyable at all.
+			view.streams.Println(format.WordWrap(
+				"Terraform has compared your real infrastructure against your configuration and found no differences, so no changes are needed.",
+				view.outputColumns(),
+			))
+		}
+		return
+	}
+	if haveRefreshChanges {
+		view.streams.Print(format.HorizontalRule(view.colorize, view.outputColumns()))
+		view.streams.Println("")
 	}
 
 	headerBuf := &bytes.Buffer{}

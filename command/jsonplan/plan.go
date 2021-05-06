@@ -31,8 +31,9 @@ type plan struct {
 	TerraformVersion string      `json:"terraform_version,omitempty"`
 	Variables        variables   `json:"variables,omitempty"`
 	PlannedValues    stateValues `json:"planned_values,omitempty"`
-	// ResourceChanges are sorted in a user-friendly order that is undefined at
-	// this time, but consistent.
+	// ResourceDrift and ResourceChanges are sorted in a user-friendly order
+	// that is undefined at this time, but consistent.
+	ResourceDrift   []resourceChange  `json:"resource_drift,omitempty"`
 	ResourceChanges []resourceChange  `json:"resource_changes,omitempty"`
 	OutputChanges   map[string]change `json:"output_changes,omitempty"`
 	PriorState      json.RawMessage   `json:"prior_state,omitempty"`
